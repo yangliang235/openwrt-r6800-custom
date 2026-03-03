@@ -55,7 +55,6 @@ jobs:
           echo "CONFIG_HZ=1000" >> .config
           echo "CONFIG_PACKAGE_ethtool=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt76-connac=y" >> .config
-          echo "sleep 5" >> package/base-files/files/etc/rc.local
           echo "vm.dirty_ratio=10" >> package/base-files/files/etc/sysctl.conf
           echo "vm.dirty_background_ratio=5" >> package/base-files/files/etc/sysctl.conf
 
@@ -146,7 +145,9 @@ jobs:
           # Hogy ne legyen "micro-stutter" a hálózaton
           echo "net.ipv4.tcp_ecn=1" >> package/base-files/files/etc/sysctl.conf
           echo "net.ipv4.tcp_slow_start_after_idle=0" >> package/base-files/files/etc/sysctl.conf
-          echo "echo f > /sys/class/net/eth0/queues/rx-0/rps_cpus" >> package/base-files/files/etc/rc.local
+          echo "#!/bin/sh" > package/base-files/files/etc/rc.local
+          sed -i '1i sleep 5' package/base-files/files/etc/rc.local
+          echo "for x in /sys/class/net/*/queues/rx-0/rps_cpus; do echo f > \$x; done" >> package/base-files/files/etc/rc.local
           # Kikapcsoljuk a Wi-Fi és a LAN alvó módjait
           echo "iw dev wlan0 set power_save off" >> package/base-files/files/etc/rc.local
           echo "iw dev wlan1 set power_save off" >> package/base-files/files/etc/rc.local
