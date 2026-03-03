@@ -49,9 +49,13 @@ jobs:
       - name: Run defconfig & Safety Check
         run: |
           cd src
+          # Kényszerítjük a Wi-Fi drivert, mielőtt a defconfig lefutna
+          echo "CONFIG_PACKAGE_kmod-mt7615e=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mt7615-common=y" >> .config
+          
           make defconfig
-          # [span_13](start_span)Ellenőrizzük, hogy a Wi-Fi driver nem esett-e ki a tuning miatt[span_13](end_span)
-          grep "CONFIG_PACKAGE_kmod-mt7615e=y" .config || (echo "ERROR: Wi-Fi driver missing!" && exit 1)
+          # Most már át fog menni az ellenőrzésen
+          grep "CONFIG_PACKAGE_kmod-mt7615e=y" .config || (echo "ERROR: Wi-Fi driver missing!" && exit 1)  
 
       - name: Build firmware
         run: |
