@@ -32,11 +32,11 @@ jobs:
       - name: 0x7 & Patches
         run:  |
           echo "mt7615 3-antenna fix loading..."
-          # Target antenna_mask, chainmask, and rx_chainmask with case-insensitivity
-          find src/ -type f -name "mt7615.h" -o -name "init.c" -o -name "main.c" | xargs -r sed -i 's/\(antenna_mask\|chainmask\|rx_chainmask\) = 0x[fF]/\1 = 0x7/g'
-          
+          find src/ \( -name "mt7615.h" -o -name "init.c" -o -name "main.c" \) -type f \
+           -exec sed -i 's/\(antenna_mask\|chainmask\|rx_chainmask\) = 0x[fF]/\1 = 0x7/g' {} +
           # Final catch-all for any missed 0xF defines in the radio-specific files
-          find src/ -type f -name "mt7615.h" | xargs -r sed -i 's/0x[fF]/0x7/g'
+          find src/ -type f -name "mt7615.h" | xargs -r sed -i '/antenna_mask\|chainmask\|rx_chainmask/ s/0x[fF]/0x7/' file.c
+          
           find src/ -type f -name "mcu.c" | xargs -r sed -i 's/conf->scantime = 60/conf->scantime = 0/g'
           
           # Prevent MCU timeouts during high-load SQM processing
@@ -228,7 +228,6 @@ jobs:
           # Force the LAN switch to stay at full power 24/7
           # No 'Green Ethernet' power saving (IEEE 802.3az) which causes 2ms wake-up lag
           echo "ethtool --set-eee eth0 eee off" >> package/base-files/files/etc/rc.local
-
           
       - name: Run defconfig & Safety Check
         run: |
@@ -241,6 +240,8 @@ jobs:
         run: |
           cd src
           make -j$(nproc) || make -j1 V=s
+          grep -r "0x7" build_dir/ | head
+          grep -r "MT_HT_BSS_COEX_TGT_THRESHOLD" build_dir/
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
