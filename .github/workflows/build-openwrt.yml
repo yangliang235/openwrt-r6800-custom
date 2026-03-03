@@ -45,6 +45,12 @@ jobs:
           # Force driver to prioritize 80MHz/VHT bandwidth over neighbor 'noise'
           find src/ -type f -name "mt7615.h" | xargs -r sed -i 's/MT_HT_BSS_COEX_TGT_THRESHOLD 10/MT_HT_BSS_COEX_TGT_THRESHOLD 0/g'
           
+          # Fix for older hardware dropping after rekeying
+          find src/ -type f -name "init.c" | xargs -r sed -i 's/dev->mt76.gtk_offload = true/dev->mt76.gtk_offload = false/g'
+          
+          # Disable A-MSDU offloading to prevent jitter and 'micro-crashes'
+          find src/ -type f -name "mmio.c" | xargs -r sed -i 's/MT_DRV_AMSDU_OFFLOAD,//g'
+          
           if [ -d "patches" ]; then
             echo "Applying custom patches..."
             cp -r patches/* src/target/linux/ramips/patches-5.15/ 2>/dev/null || true
@@ -95,10 +101,6 @@ jobs:
 
           # 8. NO-ATIME & FLASH OPTIMIZATION (Hogy ne lassuljon a rendszer)
           sed -i 's/defaults/noatime,nodiratime/g' package/base-files/files/lib/functions/uci-defaults.sh
-
-          # 9. KERNEL MEMORY TUNING (Huge Pages & Puffer stabilitás)
-          echo "CONFIG_TRANSPARENT_HUGEPAGE=y" >> .config
-          echo "CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y" >> .config
           
           # 10. SUBOTICA AUDIO-LATENCY FIX (A 16kHz-es tiszta jelért)
           echo "net.ipv4.tcp_low_latency=1" >> package/base-files/files/etc/sysctl.conf
