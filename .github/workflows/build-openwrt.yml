@@ -37,7 +37,14 @@ jobs:
           
           # Final catch-all for any missed 0xF defines in the radio-specific files
           find src/ -type f -name "mt7615.h" | xargs -r sed -i 's/0x[fF]/0x7/g'
+          find src/ -type f -name "mcu.c" | xargs -r sed -i 's/conf->scantime = 60/conf->scantime = 0/g'
+          
+          # Prevent MCU timeouts during high-load SQM processing
+          find src/package/kernel/mt76/ -type f -name "mcu.c" | xargs -r sed -i 's/MT76_MCU_TIMEOUT 100/MT76_MCU_TIMEOUT 500/g'
 
+          # Force driver to prioritize 80MHz/VHT bandwidth over neighbor 'noise'
+          find src/ -type f -name "mt7615.h" | xargs -r sed -i 's/MT_HT_BSS_COEX_TGT_THRESHOLD 10/MT_HT_BSS_COEX_TGT_THRESHOLD 0/g'
+          
           if [ -d "patches" ]; then
             echo "Applying custom patches..."
             cp -r patches/* src/target/linux/ramips/patches-5.15/ 2>/dev/null || true
