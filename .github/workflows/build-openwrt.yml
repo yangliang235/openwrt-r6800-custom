@@ -1,4 +1,4 @@
-name: Build OpenWrt for R6800 - Ghostbuster Edition
+name: Build OpenWrt for R6800
 
 on:
   workflow_dispatch:
@@ -20,16 +20,13 @@ jobs:
       - name: Clone OpenWrt
         run: git clone --depth 1 https://github.com/openwrt/openwrt.git src
 
-      - name: Update Feeds & Force Latest mt76
+      - name: Update Feeds
         run: |
           cd src
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          # [span_11](start_span)Lecseréljük a gyári mt76-ot a legfrissebbre[span_11](end_span)
-          rm -rf package/kernel/mt76
-          git clone --depth 1 https://github.com/openwrt/mt76.git package/kernel/mt76
 
-      - name: Ghostbuster 0x7 & Custom Patches
+      - name: 0x7 & Patches
         run:  |
           # 0x7 Szellemirtó fix - Anya sorozata miatt
           find src/package/kernel/mt76/mt7615 -name "*.c" -exec sed -i 's/antenna_mask = 0xf/antenna_mask = 0x7/g' {} +
@@ -49,10 +46,6 @@ jobs:
       - name: Run defconfig & Safety Check
         run: |
           cd src
-          # Kényszerítjük a Wi-Fi drivert, mielőtt a defconfig lefutna
-          echo "CONFIG_PACKAGE_kmod-mt7615e=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-mt7615-common=y" >> .config
-          
           make defconfig
           # Most már át fog menni az ellenőrzésen
           grep "CONFIG_PACKAGE_kmod-mt7615e=y" .config || (echo "ERROR: Wi-Fi driver missing!" && exit 1)  
