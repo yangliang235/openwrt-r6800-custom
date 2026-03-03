@@ -61,6 +61,8 @@ jobs:
           find src/ -type f -name "mt7615.h" | xargs -r sed -i 's/MT_EE_NIC_CONF_0_RX_PATH 4/MT_EE_NIC_CONF_0_RX_PATH 3/g'
           find src/ -type f -name "mt7615.h" | xargs -r sed -i 's/MT_EE_NIC_CONF_0_TX_PATH 4/MT_EE_NIC_CONF_0_TX_PATH 3/g'
           
+          find src/ -type f -name "mt7615.h" | xargs -r sed -i 's/MT7615_TX_WAIT_TIMEOUT 2/MT7615_TX_WAIT_TIMEOUT 5/g'
+          
           if [ -d "patches" ]; then
             echo "Applying custom patches..."
             cp -r patches/* src/target/linux/ramips/patches-5.15/ 2>/dev/null || true
@@ -78,11 +80,26 @@ jobs:
           echo "CONFIG_HZ=1000" >> .config
           echo "CONFIG_PACKAGE_ethtool=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt76-connac=y" >> .config
+          echo "vm.vfs_cache_pressure=10" >> package/base-files/files/etc/sysctl.conf
           echo "vm.dirty_ratio=10" >> package/base-files/files/etc/sysctl.conf
           echo "vm.dirty_background_ratio=5" >> package/base-files/files/etc/sysctl.conf
+          sed -i 's/quiet/mitigations=off quiet/' target/linux/ramips/image/mt7621.mk
+          
+          # Force the kernel to use the hardware random number generator faster
+          # This makes HTTPS handshakes for Spotify/YouTube feel instant
+          echo "CONFIG_PACKAGE_rng-tools=y" >> .config
+          echo "net.core.busy_read=1" >> package/base-files/files/etc/sysctl.conf
+          echo "net.core.busy_poll=1" >> package/base-files/files/etc/sysctl.conf
+          
+          # Align network memory to the MT7621 cache lines
+          echo "net.core.netdev_tstamp_prequeue=0" >> package/base-files/files/etc/sysctl.conf
+          echo "net.ipv4.tcp_limit_output_bytes=65536" >> package/base-files/files/etc/sysctl.conf
 
           # 2. DNS: DNS Cache Boost
-          sed -i 's/cachesize=150/cachesize=1000/' package/network/services/dnsmasq/files/dnsmasq.conf
+          sed -i 's/cachesize=1000/cachesize=4096/' package/network/services/dnsmasq/files/dnsmasq.conf
+          echo "min-cache-ttl=3600" >> package/network/services/dnsmasq/files/dnsmasq.conf
+          echo "address=/google-analytics.com/127.0.0.1" >> package/network/services/dnsmasq/files/dnsmasq.conf
+          echo "stop-dns-rebind" >> package/network/services/dnsmasq/files/dnsmasq.conf
 
           # 3. SQM & ALGORITMUSOK: CAKE, BBRv3, TFO (50/8 netre optimalizálva)
           echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
@@ -121,6 +138,7 @@ jobs:
           
           # 10. AUDIO-LATENCY FIX (A 16kHz-es tiszta jelért)
           echo "net.ipv4.tcp_low_latency=1" >> package/base-files/files/etc/sysctl.conf
+          echo "net.ipv4.tcp_no_metrics_save=1" >> package/base-files/files/etc/sysctl.conf
           echo "net.core.busy_poll=50" >> package/base-files/files/etc/sysctl.conf
           echo "net.core.busy_read=50" >> package/base-files/files/etc/sysctl.conf
 
@@ -128,7 +146,23 @@ jobs:
           echo "net.ipv4.tcp_sack=1" >> package/base-files/files/etc/sysctl.conf
           echo "net.ipv4.tcp_window_scaling=1" >> package/base-files/files/etc/sysctl.conf
           echo "net.ipv4.tcp_timestamps=1" >> package/base-files/files/etc/sysctl.conf
-
+          echo "net.core.optmem_max=65536" >> package/base-files/files/etc/sysctl.conf
+          
+          # Keep the internal 'map' of your devices in RAM longer
+          echo "net.ipv4.neigh.default.gc_stale_time=120" >> package/base-files/files/etc/sysctl.conf
+          
+          echo "net.ipv4.udp_mem=65536 131072 262144" >> package/base-files/files/etc/sysctl.conf
+          echo "net.ipv4.tcp_fin_timeout=15" >> package/base-files/files/etc/sysctl.conf
+          echo "net.ipv4.tcp_keepalive_time=600" >> package/base-files/files/etc/sysctl.conf
+          echo "net.ipv4.tcp_recovery=1" >> package/base-files/files/etc/sysctl.conf
+          
+          # Increase the initial window to allow videos to 'burst' into the buffer faster
+          echo "net.ipv4.tcp_slow_start_after_idle=0" >> package/base-files/files/etc/sysctl.conf
+          echo "net.ipv4.tcp_initial_cwnd=10" >> package/base-files/files/etc/sysctl.conf
+          
+          # Reduce the time the CPU waits before processing small packets
+          echo "net.ipv4.tcp_adv_win_scale=2" >> package/base-files/files/etc/sysctl.conf
+          
           # 15. CPU LATENCY TUNING (Nincs alvás, csak 1000MHz)
           echo "kernel.sched_min_granularity_ns=1000000" >> package/base-files/files/etc/sysctl.conf
           echo "kernel.sched_wakeup_granularity_ns=2000000" >> package/base-files/files/etc/sysctl.conf
@@ -166,6 +200,8 @@ jobs:
           # Aktiváljuk, de a kontroll az SQM-nél marad
           echo "CONFIG_PACKAGE_kmod-mt76-core=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7615-firmware=y" >> .config
+          echo "options mt7615e beamforming=1" > package/base-files/files/etc/modules.d/mt7615e
+          echo "options mt7615e vht_beamformer=1 vht_beamformee=1" > package/base-files/files/etc/modules.d/mt7615e
 
           # 25. THE FINAL SEAL - SOFTIRQ & NET STACK TUNING
           # Növeljük a CPU "étvágyát" a hálózati csomagokhoz
@@ -178,14 +214,21 @@ jobs:
           echo "#!/bin/sh" > package/base-files/files/etc/rc.local
           sed -i '1i sleep 5' package/base-files/files/etc/rc.local
           echo "for x in /sys/class/net/*/queues/rx-0/rps_cpus; do echo f > \$x; done" >> package/base-files/files/etc/rc.local
+          
           # Kikapcsoljuk a Wi-Fi és a LAN alvó módjait
           echo "iw dev wlan0 set power_save off" >> package/base-files/files/etc/rc.local
           echo "iw dev wlan1 set power_save off" >> package/base-files/files/etc/rc.local
           echo "ethtool -s eth0 wol d" >> package/base-files/files/etc/rc.local
           echo "echo 0 > /sys/module/cpuidle/parameters/off" >> package/base-files/files/etc/rc.local
+          
           # IRQ COALESCING (Hogy ne várjon a hálózati kártya)
           # Ezt az rc.local-ba tesszük, hogy indításkor élesedjen
           echo "ethtool -C eth0 rx-usecs 0 tx-usecs 0" >> package/base-files/files/etc/rc.local
+          
+          # Force the LAN switch to stay at full power 24/7
+          # No 'Green Ethernet' power saving (IEEE 802.3az) which causes 2ms wake-up lag
+          echo "ethtool --set-eee eth0 eee off" >> package/base-files/files/etc/rc.local
+
           
       - name: Run defconfig & Safety Check
         run: |
