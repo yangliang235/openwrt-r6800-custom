@@ -1,0 +1,11 @@
+--- a/drivers/net/wireless/mtk/mt76/mt7615/init.c
++++ b/drivers/net/wireless/mtk/mt76/mt7615/init.c
+@@ -150,7 +150,7 @@ static int mt7615_init_hardware(struct m
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	dev->antenna_mask = 0xf;
++	dev->antenna_mask = 0x7;
+ 
+ 	ret = mt7615_eeprom_init(dev);
+ 	if (ret < 0)
