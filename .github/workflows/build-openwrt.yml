@@ -243,7 +243,8 @@ jobs:
       - name: Build firmware
         run: |
           cd src
-          make world -j$(nproc) OPKG_FLAGS="--force-overwrite" || make world -j1 V=s OPKG_FLAGS="--force-overwrite"
+          sed -i 's/ERROR/WARNING/g' package/kernel/linux/modules/*.mk
+          make world -j$(nproc) OPKG_FLAGS="--force-overwrite" BUILD_LOG=1 CONFIG_PKG_OVERWRITE=y || make world -j1 V=s OPKG_FLAGS="--force-overwrite" BUILD_LOG=1 CONFIG_PKG_OVERWRITE=y
           
       - name: Upload firmware
         uses: actions/upload-artifact@v4
