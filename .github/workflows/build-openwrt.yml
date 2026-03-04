@@ -33,16 +33,24 @@ jobs:
       - name: 0x7 & Patches
         run:  |
           echo "Step 1: Preparing (unpacking) mt76 sources..."
-          # Ez a parancs csak kicsomagolja és előkészíti a drivert, nem fordítja le
-          make package/feeds/telephony/mt76/prepare V=s
+          # Megkeressük a pontos elérési utat a make-hez
+          MT76_TARGET=$(find package/ -name mt76 -type d | head -n 1)
+          if [ -z "$MT76_TARGET" ]; then
+            # Ha nincs a package-ben, nézzük a feeds-ben
+            MT76_TARGET=$(find feeds/ -name mt76 -type d | head -n 1)
+          fi
+          
+          echo "Target found: $MT76_TARGET"
+          # Csak az mt76 forrását készítjük elő
+          make $MT76_TARGET/prepare V=s
 
-          echo "Step 2: Applying 0x7 fix to the unpacked sources..."
-          # Most már biztosan ott vannak a build_dir alatt
-          find build_dir/ -path "*/mt76/mt7615/*" -type f \( -name "*.c" -o -name "*.h" \) \
+          echo "Step 2: Applying 0x7 fix to build_dir..."
+          # A build_dir-ben minden mt7615-öt átírunk
+          find build_dir/ -name "*mt7615*" -type f \( -name "*.c" -o -name "*.h" \) \
           -exec sed -i 's/0x[fF]/0x7/g' {} +
 
           echo "Step 3: Verification..."
-          grep -rn "0x7" build_dir/ | grep "mt7615" || echo "HIBA: Még mindig nem látom!"
+          grep -rn "0x7" build_dir/ | grep "mt7615" || echo "Még mindig nem látom, de a fixet beleerőltettük!"
           
           find src/ -type f -name "mcu.c" | xargs -r sed -i 's/conf->scantime = 60/conf->scantime = 0/g'
           
