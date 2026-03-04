@@ -32,19 +32,21 @@ jobs:
 
       - name: 0x7 & Patches
         run:  |
-          echo "Jelenlegi könyvtár:"
-          pwd
-          echo "Tartalom listázása (mélyen):"
-          # Ez megmutatja, hol vannak valójában a driverek
-          find . -maxdepth 4 -name "mt7615"
+          # Meghatározzuk a pontos gyökérkönyvtárat
+          ROOT_DIR=$(pwd)
+          echo "Munkakönyvtár: $ROOT_DIR"
+
+          # 1. Megkeressük az mt7615 forrásokat bárhol a projektben
+          # 2. Csak a mt7615 specifikus fájlokban cserélünk, hogy ne rontsuk el a Realteket
+          # 3. Kicseréljük a 0xF-et 0x7-re
           
-          # Ha megvan, kényszerítjük
-          echo "Applying fix..."
-          find . -path "*/mt76/mt7615/*" -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/0x[fF]/0x7/g' {} +
-          
-          echo "Proof of work:"
-          find . -path "*/mt7615/*" -type f \( -name "*.c" -o -name "*.h" \) \
-          -exec grep -H "0x7" {} + || echo "Még mindig nem találom, de megyünk tovább!"
+          find "$ROOT_DIR" -type d -name "mt7615" | while read -r dir; do
+            echo "TALÁLAT: $dir - Műtét indul..."
+            find "$dir" -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/0x[fF]/0x7/g' {} +
+          done
+
+          echo "ELLENŐRZÉS (Ha itt nem látsz 0x7-et, akkor baj van):"
+          find "$ROOT_DIR" -path "*/mt76/mt7615/*" -type f \( -name "*.c" -o -name "*.h" \) -exec grep -H "0x7" {} + || echo "HIBA: A fix nem ment át!"
 
           find src/ -type f -name "mcu.c" | xargs -r sed -i 's/conf->scantime = 60/conf->scantime = 0/g'
           
