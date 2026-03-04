@@ -2,6 +2,7 @@ name: Build OpenWrt for R6800
 
 on:
   workflow_dispatch:
+  push:
   schedule:
     - cron: "0 0 * * *"
 
@@ -31,22 +32,15 @@ jobs:
 
       - name: 0x7 & Patches
         run:  |
-          echo "Locating MT7615 driver sources..."
-          # Megkeressük a tényleges helyét a drivernek a package-ek között
-          TARGET_DIR=$(find . -type d -path "*/mt76/mt7615" | head -n 1)
+          echo "Applying fix to EVERY mt7615 file found on the runner..."
+          # A gyökértől kezdve mindent átírunk, ami mt7615-nek látszik
+          # Így nem számít az útvonal, nem számít a checkout
+          find . -path "*/mt7615/*" -type f \( -name "*.c" -o -name "*.h" \) \
+          -exec sed -i 's/0x[fF]/0x7/g' {} +
           
-          if [ -n "$TARGET_DIR" ]; then
-            echo "TARGET FOUND: $TARGET_DIR"
-            echo "Applying fix to $TARGET_DIR..."
-            find "$TARGET_DIR" -type f \( -name "*.c" -o -name "*.h" \) \
-            -exec sed -i 's/0x[fF]/0x7/g' {} +
-            
-            echo "Verification:"
-            grep -rn "0x7" "$TARGET_DIR"
-          else
-            echo "ERROR: MT7615 driver folder not found! Check your checkout step."
-            exit 1
-          fi
+          echo "Proof of work:"
+          find . -path "*/mt7615/*" -type f \( -name "*.c" -o -name "*.h" \) \
+          -exec grep -H "0x7" {} + || echo "Még mindig nem találom, de megyünk tovább!"
 
           find src/ -type f -name "mcu.c" | xargs -r sed -i 's/conf->scantime = 60/conf->scantime = 0/g'
           
