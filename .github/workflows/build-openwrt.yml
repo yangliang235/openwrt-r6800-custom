@@ -32,17 +32,17 @@ jobs:
 
       - name: 0x7 & Patches
         run:  |
-          echo "Scanning EVERYTHING for mt7615..."
-          # Minden .c és .h fájlt megkeresünk a teljes munkakönyvtárban
-          # Csak azokat módosítjuk, amiknek az útvonalában benne van a 'mt7615'
-          # Ez kikerüli a Realtek/AT91 hibát, de eltalálja a célpontot
-          
-          find . -type f -wholename "*mt7615*" \( -name "*.c" -o -name "*.h" \) \
+          echo "Step 1: Preparing (unpacking) mt76 sources..."
+          # Ez a parancs csak kicsomagolja és előkészíti a drivert, nem fordítja le
+          make package/feeds/telephony/mt76/prepare V=s
+
+          echo "Step 2: Applying 0x7 fix to the unpacked sources..."
+          # Most már biztosan ott vannak a build_dir alatt
+          find build_dir/ -path "*/mt76/mt7615/*" -type f \( -name "*.c" -o -name "*.h" \) \
           -exec sed -i 's/0x[fF]/0x7/g' {} +
 
-          echo "BOMBABIZTOS ELLENŐRZÉS:"
-          # Kiíratjuk a fájl nevét és a módosított sort is
-          grep -rn "0x7" . | grep "mt7615" || echo "Még mindig semmi? Ez lehetetlen."
+          echo "Step 3: Verification..."
+          grep -rn "0x7" build_dir/ | grep "mt7615" || echo "HIBA: Még mindig nem látom!"
           
           find src/ -type f -name "mcu.c" | xargs -r sed -i 's/conf->scantime = 60/conf->scantime = 0/g'
           
