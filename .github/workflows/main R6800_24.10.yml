@@ -28,7 +28,7 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential gcc-multilib g++-multilib flex bison gawk libncurses-dev libssl-dev python3-distutils python3-setuptools zlib1g-dev swig rsync unzip wget ccache patch
       - name: Clone OpenWrt
-        run: git clone --depth 1 https:/github.com/openwrt/openwrt/tree/openwrt-24.10 src
+        run: git clone --depth 1 https:/git.openwrt.org/openwrt/openwrt.git src
 
       - name: Update Feeds
         run: |
