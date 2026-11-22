@@ -16,13 +16,13 @@ jobs:
       - name: Cache
         uses: actions/cache@v4
         with:
-         path: |
-           ~/.cache
-           dl
-           feeds
-         key: ${{ runner.os }}-openwrt-${{ hashFiles('**/Makefile') }}
-         restore-keys: |
-          ${{ runner.os }}-openwrt-      
+          path: |
+            ~/.cache
+            dl
+            feeds
+          key: ${{ runner.os }}-openwrt-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-
 
       - name: Install dependencies
         run: |
@@ -30,7 +30,7 @@ jobs:
           sudo apt install -y build-essential gcc-multilib g++-multilib flex bison gawk libncurses-dev libssl-dev python3-distutils python3-setuptools zlib1g-dev swig rsync unzip wget ccache patch
 
       - name: Clone OpenWrt
-        run: git clone --depth 1 https://github.com/openwrt/openwrt/tree/openwrt-25.12.git src
+        run: git clone --depth 1 https://github.com/openwrt/openwrt.git src
 
       - name: Update Feeds
         run: |
@@ -40,56 +40,68 @@ jobs:
 
       - name: Install .config
         run: cp config/.config src/.config
-        
-      - name: Tweaks
-        run: |           
-          # 1. Beállítások rögzítése
-          BASE_DIR=$(pwd)
-          PATCH_DIR="$BASE_DIR/patches"
-          SRC_DIR="$BASE_DIR/src"
 
-          # Ellenőrizzük az src mappát
-          if [ ! -d "$SRC_DIR" ]; then
-            echo "❌ HIBA: Nem találom az src mappát itt: $SRC_DIR"
-            exit 1
-          fi
-
-          # 2. UNIVERZÁLIS PATCHELÉS
-          if [ -d "$PATCH_DIR" ]; then
-            echo "✅ Patches mappa megtalálva: $PATCH_DIR"
-            cd "$SRC_DIR"
-            for patch_file in "$PATCH_DIR"/*.patch; do
-              [ -e "$patch_file" ] || continue
-              echo "🔍 Alkalmazás: $(basename "$patch_file")"
-              
-              # Megpróbáljuk p1, p0, majd p2 szinten is, hátha...
+      - name: Tweaks (Patches, Overclock, ZRAM with ZSTD, Sysctl, rc.local)
+        run: |
+          cd src
+          # --- 1. 自定义补丁应用 (保留原逻辑) ---
+          if [ -d "../patches" ]; then
+            echo "🚀 应用自定义补丁..."
+            for patch_file in $(ls ../patches/*.patch); do
+              echo "🔍 尝试应用: $patch_file"
               if patch -p1 --dry-run < "$patch_file" > /dev/null 2>&1; then
                 patch -p1 < "$patch_file"
+                echo "✅ $patch_file 应用成功 (p1)"
               elif patch -p0 --dry-run < "$patch_file" > /dev/null 2>&1; then
                 patch -p0 < "$patch_file"
-              elif patch -p2 --dry-run < "$patch_file" > /dev/null 2>&1; then
-                patch -p2 < "$patch_file"
+                echo "✅ $patch_file 应用成功 (p0)"
               else
-                echo "❌ HIBA: A $(basename "$patch_file") nem illeszkedik sehogy!"
-                # Itt megnézzük mi a baj (debug)
-                patch -p1 --dry-run < "$patch_file" || true
+                echo "❌ $patch_file 无法应用，跳过"
               fi
             done
           fi
 
-          cd src
-          
-          # 1. EXTRÉM OVERCLOCK (MT7621 @ 1100MHz - A fizika határain)
-          find target/linux/ramips/dts/ -name "MT7621.dtsi" -exec sed -i 's/clock-frequency = <880000000>/clock-frequency = <1100000000>/g' {} +
+          # --- 2. 超频 (1100MHz) ---
+          echo "🔧 应用 MT7621 频率修改 (1100MHz)..."
+          find target/linux/ramips/dts/ -name "mt7621_netgear_r6800.dts" -exec sed -i 's/clock-frequency = <880000000>/clock-frequency = <1100000000>/g' {} +
+          find target/linux/ramips/dts/ -name "mt7621.dtsi" -exec sed -i 's/clock-frequency = <880000000>/clock-frequency = <1100000000>/g' {} +
+          echo "⚠️ CPU 频率已修改为 1100MHz"
 
-          # 3. HIGHMEM & OPTIMALIZÁCIÓ (A 250 MiB RAM kulcsa)
-          echo "CONFIG_HIGHMEM=y" >> .config
-          echo "CONFIG_CPU_MIPS32_R2=y" >> .config
-          echo "CONFIG_NR_CPUS=4" >> .config
+          # --- 3. ZRAM: 切换压缩算法为 ZSTD (核心修改) ---
+          echo "CONFIG_PACKAGE_kmod-zram=y" >> .config
+          echo "CONFIG_PACKAGE_zram-swap=y" >> .config
+          # 替换 lz4 为 zstd 依赖
+          echo "CONFIG_PACKAGE_kmod-lib-zstd=y" >> .config
+          # 同时安装 zstd 工具包本身 (可选，但推荐)
+          echo "CONFIG_PACKAGE_zstd=y" >> .config
+          # 关键: 将 zram 的默认压缩算法设置为 zstd
+          # 这行配置会自动 select PACKAGE_kmod-lib-zstd，但显式声明更保险。
+          echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> .config
 
-          # 4. A MASSZÍV SYSCTL BLOKK (Konfliktusmentes /etc/sysctl.d/99-tuning.conf)
+          # 确保 BusyBox 的 swap 工具被启用
+          echo "CONFIG_BUSYBOX_CONFIG_MKSWAP=y" >> .config
+          echo "CONFIG_BUSYBOX_CONFIG_SWAPON=y" >> .config
+          echo "CONFIG_BUSYBOX_CONFIG_SWAPOFF=y" >> .config
+          echo "✅ ZRAM 已配置为使用 ZSTD 压缩算法"
+
+          # --- 4. 首次启动时通过 uci-defaults 固化 zstd 设置 (运行时保障) ---
+          # 这确保了即使内核默认值被覆盖，系统启动后 zram-swap 也会使用 zstd。
+          mkdir -p package/base-files/files/etc/uci-defaults/
+          cat <<'UCI_EOF' > package/base-files/files/etc/uci-defaults/99-zram-zstd
+          #!/bin/sh
+          # 设置 zram 压缩算法为 zstd
+          uci set system.@system[0].zram_comp_algo='zstd'
+          # 可选: 根据内存大小调整 zram 大小 (例如 256MB 设备设为 180MB)
+          uci set system.@system[0].zram_size_mb='256'
+          uci commit system
+          exit 0
+          UCI_EOF
+          chmod +x package/base-files/files/etc/uci-defaults/99-zram-zstd
+          echo "✅ 已添加 uci-defaults 脚本，首次启动自动设置 zram_comp_algo=zstd"
+
+          # --- 5. Sysctl 调优 (保留原配置) ---
           mkdir -p package/base-files/files/etc/sysctl.d/
-          cat <<EOF > package/base-files/files/etc/sysctl.d/99-tuning.conf
+          cat <<'SYSCTL_EOF' > package/base-files/files/etc/sysctl.d/99-tuning.conf
           # --- NETWORK CORE TUNING ---
           net.core.busy_read=50
           net.core.busy_poll=50
@@ -100,7 +112,6 @@ jobs:
           net.core.wmem_default=16777216
           net.core.wmem_max=16777216
           net.core.somaxconn=4096
-
           # --- TCP BRUTAL FORCE ---
           net.ipv4.tcp_rmem=4096 87380 16777216
           net.ipv4.tcp_wmem=4096 65536 16777216
@@ -127,24 +138,22 @@ jobs:
           net.ipv4.tcp_notsent_lowat=16384
           net.ipv4.tcp_limit_output_bytes=65536
           net.ipv4.tcp_challenge_ack_limit=999999
-
           # --- UDP & VFS TUNING ---
           net.ipv4.udp_rmem_min=16384
           net.ipv4.udp_wmem_min=16384
-          vm.dirty_background_ratio=5
-          vm.dirty_ratio=10
-          vm.swappiness=10
-          vm.vfs_cache_pressure=50
+          vm.dirty_background_ratio=3
+          vm.dirty_ratio=5
+          vm.swappiness=198
+          vm.vfs_cache_pressure=300
           fs.file-max=1000000
-
           # --- IPV6 & MISC ---
           net.ipv6.conf.all.disable_ipv6=0
           net.ipv6.conf.default.disable_ipv6=0
           net.netfilter.nf_conntrack_max=1048576
           net.netfilter.nf_conntrack_tcp_timeout_established=7440
-          EOF
+          SYSCTL_EOF
 
-          # 5. RC.LOCAL SZTEROID (IRQ, PPS, Offloading)
+          # --- 6. rc.local 优化 (保留原配置) ---
           sed -i '/exit 0/d' package/base-files/files/etc/rc.local
           echo "echo 1000000 > /sys/class/net/eth0/queues/rx-0/rps_flow_cnt" >> package/base-files/files/etc/rc.local
           echo "for x in /sys/class/net/*/queues/rx-0/rps_cpus; do echo f > \$x; done" >> package/base-files/files/etc/rc.local
@@ -152,21 +161,54 @@ jobs:
           echo "ethtool -C eth0 rx-usecs 0 tx-usecs 0" >> package/base-files/files/etc/rc.local
           echo "ethtool --set-eee eth0 eee off" >> package/base-files/files/etc/rc.local
           echo "exit 0" >> package/base-files/files/etc/rc.local
-          
-        
+
+      - name: Enable MU-MIMO in Wireless Config (Build-time Injection)
+        run: |
+          cd src
+          WIRELESS_CONFIG="package/base-files/files/etc/config/wireless"
+          mkdir -p $(dirname "$WIRELESS_CONFIG")
+          cat > "$WIRELESS_CONFIG" <<'WIFI_EOF'
+          config wifi-device 'radio0'
+              option type 'mac80211'
+              option channel '36'
+              option hwmode '11a'
+              option path 'pci0000:00/0000:00:00.0/0000:01:00.0'
+              option htmode 'VHT80'
+              option he_su_beamformer '1'
+              option he_su_beamformee '1'
+              option he_mu_beamformer '1'
+
+          config wifi-device 'radio1'
+              option type 'mac80211'
+              option channel '6'
+              option hwmode '11g'
+              option path 'pci0000:00/0000:00:01.0/0000:02:00.0'
+              option htmode 'HT40'
+              option he_su_beamformer '1'
+              option he_su_beamformee '1'
+              option he_mu_beamformer '1'
+          WIFI_EOF
+          echo "✅ MU-MIMO 相关无线选项已注入出厂配置"
+
       - name: Run defconfig & Safety Check
         run: |
           cd src
           make defconfig
-          # Most már át fog menni az ellenőrzésen
-          grep "CONFIG_PACKAGE_kmod-mt7615e=y" .config || (echo "ERROR: Wi-Fi driver missing!" && exit 1)  
+          # 安全检查: 确认关键驱动和功能已启用
+          grep "CONFIG_PACKAGE_kmod-mt7615e=y" .config || (echo "ERROR: Wi-Fi 驱动缺失!" && exit 1)
+          grep "CONFIG_PACKAGE_kmod-zram=y" .config || (echo "ERROR: zram 内核模块缺失!" && exit 1)
+          grep "CONFIG_PACKAGE_zram-swap=y" .config || (echo "ERROR: zram-swap 脚本缺失!" && exit 1)
+          # 确认 zstd 依赖已启用
+          grep "CONFIG_PACKAGE_kmod-lib-zstd=y" .config || (echo "ERROR: zstd 内核库缺失!" && exit 1)
+          grep "CONFIG_ZRAM_DEF_COMP_ZSTD=y" .config || (echo "ERROR: zram 默认压缩算法未设为 zstd!" && exit 1)
+          echo "✅ 所有关键配置检查通过 (ZRAM 使用 ZSTD)"
 
       - name: Build firmware
         run: |
           cd src
           sed -i 's/ERROR/WARNING/g' package/kernel/linux/modules/*.mk
           make world -j$(nproc) OPKG_FLAGS="--force-overwrite" BUILD_LOG=1 CONFIG_PKG_OVERWRITE=y || make world -j1 V=s OPKG_FLAGS="--force-overwrite" BUILD_LOG=1 CONFIG_PKG_OVERWRITE=y
-          
+
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
