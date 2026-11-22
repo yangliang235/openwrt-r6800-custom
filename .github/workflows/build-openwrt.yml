@@ -44,7 +44,7 @@ jobs:
       - name: Tweaks (Patches, Overclock, ZRAM with ZSTD, Sysctl, rc.local)
         run: |
           cd src
-          # --- 1. 自定义补丁应用 (保留原逻辑) ---
+          # --- 1. 自定义补丁应用 ---
           if [ -d "../patches" ]; then
             echo "🚀 应用自定义补丁..."
             for patch_file in $(ls ../patches/*.patch); do
@@ -67,42 +67,36 @@ jobs:
           find target/linux/ramips/dts/ -name "mt7621.dtsi" -exec sed -i 's/clock-frequency = <880000000>/clock-frequency = <1100000000>/g' {} +
           echo "⚠️ CPU 频率已修改为 1100MHz"
 
-          # --- 3. ZRAM: 切换压缩算法为 ZSTD (核心修改) ---
+          # --- 3. ZRAM: ZSTD 内核依赖与软件包 ---
           echo "CONFIG_PACKAGE_kmod-zram=y" >> .config
           echo "CONFIG_PACKAGE_zram-swap=y" >> .config
-          # 替换 lz4 为 zstd 依赖
           echo "CONFIG_PACKAGE_kmod-lib-zstd=y" >> .config
-          # 同时安装 zstd 工具包本身 (可选，但推荐)
           echo "CONFIG_PACKAGE_zstd=y" >> .config
-          # 关键: 将 zram 的默认压缩算法设置为 zstd
-          # 这行配置会自动 select PACKAGE_kmod-lib-zstd，但显式声明更保险。
+          echo "CONFIG_CRYPTO_ZSTD=y" >> .config
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> .config
-
-          # 确保 BusyBox 的 swap 工具被启用
           echo "CONFIG_BUSYBOX_CONFIG_MKSWAP=y" >> .config
           echo "CONFIG_BUSYBOX_CONFIG_SWAPON=y" >> .config
           echo "CONFIG_BUSYBOX_CONFIG_SWAPOFF=y" >> .config
-          echo "✅ ZRAM 已配置为使用 ZSTD 压缩算法"
+          echo "✅ ZRAM 软件包与 ZSTD 依赖已配置"
 
-          # --- 4. 首次启动时通过 uci-defaults 固化 zstd 设置 (运行时保障) ---
-          # 这确保了即使内核默认值被覆盖，系统启动后 zram-swap 也会使用 zstd。
+          # --- 4. 运行时固化 ZRAM 大小与压缩算法 (核心修改) ---
+          # zram-swap 从 uci system 配置中读取 zram_size_mb 和 zram_comp_algo。
           mkdir -p package/base-files/files/etc/uci-defaults/
-          cat <<'UCI_EOF' > package/base-files/files/etc/uci-defaults/99-zram-zstd
+          cat <<'UCI_EOF' > package/base-files/files/etc/uci-defaults/99-zram-config
           #!/bin/sh
-          # 设置 zram 压缩算法为 zstd
+          # 设置 ZRAM 压缩算法为 zstd
           uci set system.@system[0].zram_comp_algo='zstd'
-          # 可选: 根据内存大小调整 zram 大小 (例如 256MB 设备设为 180MB)
+          # 设置 ZRAM 大小 (单位: MB)。R6800 内存 256MB，128MB 约为内存一半，可按需调整。
           uci set system.@system[0].zram_size_mb='256'
           uci commit system
           exit 0
           UCI_EOF
-          chmod +x package/base-files/files/etc/uci-defaults/99-zram-zstd
-          echo "✅ 已添加 uci-defaults 脚本，首次启动自动设置 zram_comp_algo=zstd"
+          chmod +x package/base-files/files/etc/uci-defaults/99-zram-config
+          echo "✅ 已添加 uci-defaults 脚本: zram_comp_algo=zstd, zram_size_mb=256"
 
-          # --- 5. Sysctl 调优 (保留原配置) ---
+          # --- 5. Sysctl 调优 ---
           mkdir -p package/base-files/files/etc/sysctl.d/
           cat <<'SYSCTL_EOF' > package/base-files/files/etc/sysctl.d/99-tuning.conf
-          # --- NETWORK CORE TUNING ---
           net.core.busy_read=50
           net.core.busy_poll=50
           net.core.netdev_max_backlog=16384
@@ -112,7 +106,6 @@ jobs:
           net.core.wmem_default=16777216
           net.core.wmem_max=16777216
           net.core.somaxconn=4096
-          # --- TCP BRUTAL FORCE ---
           net.ipv4.tcp_rmem=4096 87380 16777216
           net.ipv4.tcp_wmem=4096 65536 16777216
           net.ipv4.tcp_congestion_control=bbr
@@ -138,7 +131,6 @@ jobs:
           net.ipv4.tcp_notsent_lowat=16384
           net.ipv4.tcp_limit_output_bytes=65536
           net.ipv4.tcp_challenge_ack_limit=999999
-          # --- UDP & VFS TUNING ---
           net.ipv4.udp_rmem_min=16384
           net.ipv4.udp_wmem_min=16384
           vm.dirty_background_ratio=3
@@ -146,14 +138,13 @@ jobs:
           vm.swappiness=198
           vm.vfs_cache_pressure=300
           fs.file-max=1000000
-          # --- IPV6 & MISC ---
           net.ipv6.conf.all.disable_ipv6=0
           net.ipv6.conf.default.disable_ipv6=0
           net.netfilter.nf_conntrack_max=1048576
           net.netfilter.nf_conntrack_tcp_timeout_established=7440
           SYSCTL_EOF
 
-          # --- 6. rc.local 优化 (保留原配置) ---
+          # --- 6. rc.local 优化 ---
           sed -i '/exit 0/d' package/base-files/files/etc/rc.local
           echo "echo 1000000 > /sys/class/net/eth0/queues/rx-0/rps_flow_cnt" >> package/base-files/files/etc/rc.local
           echo "for x in /sys/class/net/*/queues/rx-0/rps_cpus; do echo f > \$x; done" >> package/base-files/files/etc/rc.local
@@ -162,7 +153,7 @@ jobs:
           echo "ethtool --set-eee eth0 eee off" >> package/base-files/files/etc/rc.local
           echo "exit 0" >> package/base-files/files/etc/rc.local
 
-      - name: Enable MU-MIMO in Wireless Config (Build-time Injection)
+      - name: Enable MU-MIMO in Wireless Config
         run: |
           cd src
           WIRELESS_CONFIG="package/base-files/files/etc/config/wireless"
@@ -193,15 +184,16 @@ jobs:
       - name: Run defconfig & Safety Check
         run: |
           cd src
-          make defconfig
-          # 安全检查: 确认关键驱动和功能已启用
+          make config-clean 2>/dev/null || true
+          make defconfig WARN_RECURSIVE_DEP=1
+
           grep "CONFIG_PACKAGE_kmod-mt7615e=y" .config || (echo "ERROR: Wi-Fi 驱动缺失!" && exit 1)
           grep "CONFIG_PACKAGE_kmod-zram=y" .config || (echo "ERROR: zram 内核模块缺失!" && exit 1)
           grep "CONFIG_PACKAGE_zram-swap=y" .config || (echo "ERROR: zram-swap 脚本缺失!" && exit 1)
-          # 确认 zstd 依赖已启用
           grep "CONFIG_PACKAGE_kmod-lib-zstd=y" .config || (echo "ERROR: zstd 内核库缺失!" && exit 1)
+          grep "CONFIG_CRYPTO_ZSTD=y" .config || (echo "ERROR: CRYPTO_ZSTD 内核依赖缺失!" && exit 1)
           grep "CONFIG_ZRAM_DEF_COMP_ZSTD=y" .config || (echo "ERROR: zram 默认压缩算法未设为 zstd!" && exit 1)
-          echo "✅ 所有关键配置检查通过 (ZRAM 使用 ZSTD)"
+          echo "✅ 所有关键配置检查通过 (ZRAM 使用 ZSTD, 大小由 uci-defaults 设定)"
 
       - name: Build firmware
         run: |
