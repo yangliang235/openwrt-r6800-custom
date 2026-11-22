@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -66,7 +66,7 @@ jobs:
           done
           
           # 1. EXTRÉM OVERCLOCK (MT7621 @ 1100MHz - A fizika határain)
-          find target/linux/ramips/dts/ -name "MT7621.dtsi" -exec sed -i 's/clock-frequency = <880000000>/clock-frequency = <1100000000>/g' {} +
+          find target/linux/ramips/dts/ -name "MT7621.dtsi" -exec sed -i 's/clock-frequency = <1100000000>/clock-frequency = <1100000000>/g' {} +
           # 3. HIGHMEM & OPTIMALIZÁCIÓ (A 250 MiB RAM kulcsa)
           echo "CONFIG_HIGHMEM=y" >> .config
           echo "CONFIG_CPU_MIPS32_R2=y" >> .config
@@ -113,10 +113,10 @@ jobs:
           # --- UDP & VFS TUNING ---
           net.ipv4.udp_rmem_min=16384
           net.ipv4.udp_wmem_min=16384
-          vm.dirty_background_ratio=5
-          vm.dirty_ratio=10
-          vm.swappiness=10
-          vm.vfs_cache_pressure=50
+          vm.dirty_background_ratio=3
+          vm.dirty_ratio=5
+          vm.swappiness=198
+          vm.vfs_cache_pressure=300
           fs.file-max=1000000
           # --- IPV6 & MISC ---
           net.ipv6.conf.all.disable_ipv6=0
